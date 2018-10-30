@@ -3,6 +3,7 @@
 # SQL Lite DBs - projects need to be able to recreate them
 *.db
 __pycache__
+client_secret.json
 
 # Created by .gitignore support plugin (hsz.mobi)
 ### JetBrains template

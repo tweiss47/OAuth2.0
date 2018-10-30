@@ -7,7 +7,7 @@
     </script>
 </head>
 <body>
-    <div id="signinButton">
+    <div id="signInButton">
         <span class="g-signin"
             data-scope="openid email"
             data-clientid="608830178668-2mdo879m5gltao8eqa1s80bd52ot8d3m.apps.googleusercontent.com"
@@ -21,5 +21,33 @@
         </span>
     </div>
     <div id="result"></div>
+    <script>
+        function signInCallback(authResult) {
+            if (authResult['code']) {
+                // hide the signin button
+                $('signInButton').attr('style', 'display:none');
+                // send the one time use code to the server
+                $.ajax({
+                    type: 'POST',
+                    url: '/gconnect?state={{STATE}}',
+                    processData: false,
+                    contentType: 'application/octet-stream; charset=utf-8',
+                    data: authResult['code'],
+                    success: function(result) {
+                        if (result) {
+                            $('#result').html('Login Successful!<br>' + result + '<br>redirecting...');
+                            setTimeout(function() {
+                                window.location.href = '/restaurant';
+                            }, 4000);
+                        }
+                    }
+                });
+            } else if (authResult['error']) {
+                console.log('Error during signin: ' + authResult['error']);
+            } else {
+                $('#result').html('Failed to make server side call. Check your configuration and console.');
+            }
+        }
+    </script>
 </body>
 </html>
