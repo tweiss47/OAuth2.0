@@ -37,7 +37,7 @@ def createUser(login_session):
 
 
 def getUserInfo(user_id):
-    return session.query(User).filter_by(user_id = user_id).one()
+    return session.query(User).filter_by(id = user_id).one()
 
 
 def getUserId(email):
@@ -166,7 +166,6 @@ def showLogin():
 #JSON APIs to view Restaurant Information
 @app.route('/restaurant/<int:restaurant_id>/menu/JSON')
 def restaurantMenuJSON(restaurant_id):
-    restaurant = session.query(Restaurant).filter_by(id = restaurant_id).one()
     items = session.query(MenuItem).filter_by(restaurant_id = restaurant_id).all()
     return jsonify(MenuItems=[i.serialize for i in items])
 
@@ -186,8 +185,12 @@ def restaurantsJSON():
 @app.route('/')
 @app.route('/restaurant/')
 def showRestaurants():
-  restaurants = session.query(Restaurant).order_by(asc(Restaurant.name))
-  return render_template('restaurants.html', restaurants = restaurants)
+    restaurants = session.query(Restaurant).order_by(asc(Restaurant.name))
+    if 'user_id' in login_session:
+        return render_template('restaurants.html', restaurants = restaurants)
+    else:
+        return render_template('publicrestaurants.html', restaurants = restaurants)
+
 
 #Create a new restaurant
 @app.route('/restaurant/new/', methods=['GET','POST'])
@@ -244,8 +247,16 @@ def deleteRestaurant(restaurant_id):
 def showMenu(restaurant_id):
     restaurant = session.query(Restaurant).filter_by(id = restaurant_id).one()
     items = session.query(MenuItem).filter_by(restaurant_id = restaurant_id).all()
-    return render_template('menu.html', items = items, restaurant = restaurant)
-
+    if 'user_id' in login_session and login_session['user_id'] == restaurant.user_id:
+        return render_template('menu.html', items = items, restaurant = restaurant)
+    else:
+        user = getUserInfo(restaurant.user_id)
+        return render_template(
+            'publicmenu.html',
+            items = items,
+            restaurant = restaurant,
+            creator = user
+        )
 
 
 #Create a new menu item
@@ -255,6 +266,12 @@ def newMenuItem(restaurant_id):
       return redirect('/login')
 
   restaurant = session.query(Restaurant).filter_by(id = restaurant_id).one()
+
+  if login_session['user_id'] != restaurant.user_id:
+      response = make_response(json.dumps('Accessing data you did not create'), 403)
+      response.headers['Content-Type'] = 'application/json'
+      return response
+
   if request.method == 'POST':
       newItem = MenuItem(
           name = request.form['name'],
@@ -277,8 +294,14 @@ def editMenuItem(restaurant_id, menu_id):
     if 'user_id' not in login_session:
         return redirect('/login')
 
-    editedItem = session.query(MenuItem).filter_by(id = menu_id).one()
     restaurant = session.query(Restaurant).filter_by(id = restaurant_id).one()
+    if login_session['user_id'] != restaurant.user_id:
+        response = make_response(json.dumps('Accessing data you did not create'), 403)
+        response.headers['Content-Type'] = 'application/json'
+        return response
+
+    editedItem = session.query(MenuItem).filter_by(id = menu_id).one()
+
     if request.method == 'POST':
         if request.form['name']:
             editedItem.name = request.form['name']
@@ -303,7 +326,13 @@ def deleteMenuItem(restaurant_id,menu_id):
         return redirect('/login')
 
     restaurant = session.query(Restaurant).filter_by(id = restaurant_id).one()
+    if login_session['user_id'] != restaurant.user_id:
+        response = make_response(json.dumps('Accessing data you did not create'), 403)
+        response.headers['Content-Type'] = 'application/json'
+        return response
+
     itemToDelete = session.query(MenuItem).filter_by(id = menu_id).one()
+
     if request.method == 'POST':
         session.delete(itemToDelete)
         session.commit()
