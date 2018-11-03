@@ -6,7 +6,7 @@ app = Flask(__name__)
 
 from sqlalchemy import create_engine, asc
 from sqlalchemy.orm import sessionmaker
-from database_setup import Base, Restaurant, MenuItem
+from database_setup import Base, Restaurant, MenuItem, User
 
 from oauth2client.client import flow_from_clientsecrets, FlowExchangeError
 import httplib2
@@ -17,11 +17,36 @@ import requests
 CLIENT_ID = json.loads(open('client_secret.json', 'r').read())['web']['client_id']
 
 #Connect to Database and create database session
-engine = create_engine('sqlite:///restaurantmenu.db?check_same_thread=False')
+engine = create_engine('sqlite:///restaurantmenuwithusers.db?check_same_thread=False')
 Base.metadata.bind = engine
 
 DBSession = sessionmaker(bind=engine)
 session = DBSession()
+
+
+# User management
+def createUser(login_session):
+    user = User(
+        name = login_session['username'],
+        email = login_session['email'],
+        picture = login_session['picture']
+    )
+    session.add(user)
+    session.commit()
+    return getUserId(login_session['email'])
+
+
+def getUserInfo(user_id):
+    return session.query(User).filter_by(user_id = user_id).one()
+
+
+def getUserId(email):
+    try:
+        user = session.query(User).filter_by(email = email).one()
+        return user.id
+    except:
+        return None
+
 
 # Implement login functionality
 @app.route('/gconnect', methods=['POST'])
@@ -88,6 +113,12 @@ def gconnect():
     login_session['picture'] = data['picture']
     login_session['email'] = data['email']
 
+    # if the user is new add them
+    user_id = getUserId(login_session['email'])
+    if user_id == None:
+        user_id = createUser(login_session)
+    login_session['user_id'] = user_id
+
     # display user information response
     output = '<h1>Welcome, {}!</h1>'.format(login_session['username'])
     output += '<img src="{}" style="width: 300px; height: 300px; border-radius: 150px"'.format(login_session['picture'])
@@ -114,6 +145,7 @@ def gdisconnect():
         del login_session['username']
         del login_session['picture']
         del login_session['email']
+        del login_session['user_id']
         response = make_response(json.dumps('User disconnected'), 200)
         response.headers['Content-Type'] = 'application/json'
         return response
@@ -160,11 +192,14 @@ def showRestaurants():
 #Create a new restaurant
 @app.route('/restaurant/new/', methods=['GET','POST'])
 def newRestaurant():
-  if 'username' not in login_session:
+  if 'user_id' not in login_session:
       return redirect('/login')
 
   if request.method == 'POST':
-      newRestaurant = Restaurant(name = request.form['name'])
+      newRestaurant = Restaurant(
+          name = request.form['name'],
+          user_id = login_session['user_id']
+      )
       session.add(newRestaurant)
       flash('New Restaurant %s Successfully Created' % newRestaurant.name)
       session.commit()
@@ -175,7 +210,7 @@ def newRestaurant():
 #Edit a restaurant
 @app.route('/restaurant/<int:restaurant_id>/edit/', methods = ['GET', 'POST'])
 def editRestaurant(restaurant_id):
-  if 'username' not in login_session:
+  if 'user_id' not in login_session:
       return redirect('/login')
 
   editedRestaurant = session.query(Restaurant).filter_by(id = restaurant_id).one()
@@ -191,7 +226,7 @@ def editRestaurant(restaurant_id):
 #Delete a restaurant
 @app.route('/restaurant/<int:restaurant_id>/delete/', methods = ['GET','POST'])
 def deleteRestaurant(restaurant_id):
-  if 'username' not in login_session:
+  if 'user_id' not in login_session:
       return redirect('/login')
 
   restaurantToDelete = session.query(Restaurant).filter_by(id = restaurant_id).one()
@@ -216,12 +251,19 @@ def showMenu(restaurant_id):
 #Create a new menu item
 @app.route('/restaurant/<int:restaurant_id>/menu/new/',methods=['GET','POST'])
 def newMenuItem(restaurant_id):
-  if 'username' not in login_session:
+  if 'user_id' not in login_session:
       return redirect('/login')
 
   restaurant = session.query(Restaurant).filter_by(id = restaurant_id).one()
   if request.method == 'POST':
-      newItem = MenuItem(name = request.form['name'], description = request.form['description'], price = request.form['price'], course = request.form['course'], restaurant_id = restaurant_id)
+      newItem = MenuItem(
+          name = request.form['name'],
+          description = request.form['description'],
+          price = request.form['price'],
+          course = request.form['course'],
+          restaurant_id = restaurant_id,
+          user_id = login_session['user_id']
+      )
       session.add(newItem)
       session.commit()
       flash('New Menu %s Item Successfully Created' % (newItem.name))
@@ -232,7 +274,7 @@ def newMenuItem(restaurant_id):
 #Edit a menu item
 @app.route('/restaurant/<int:restaurant_id>/menu/<int:menu_id>/edit', methods=['GET','POST'])
 def editMenuItem(restaurant_id, menu_id):
-    if 'username' not in login_session:
+    if 'user_id' not in login_session:
         return redirect('/login')
 
     editedItem = session.query(MenuItem).filter_by(id = menu_id).one()
@@ -257,7 +299,7 @@ def editMenuItem(restaurant_id, menu_id):
 #Delete a menu item
 @app.route('/restaurant/<int:restaurant_id>/menu/<int:menu_id>/delete', methods = ['GET','POST'])
 def deleteMenuItem(restaurant_id,menu_id):
-    if 'username' not in login_session:
+    if 'user_id' not in login_session:
         return redirect('/login')
 
     restaurant = session.query(Restaurant).filter_by(id = restaurant_id).one()
