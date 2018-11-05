@@ -7,6 +7,7 @@
     </script>
 </head>
 <body>
+    <!-- Google Login -->
     <div id="signInButton">
         <span class="g-signin"
             data-scope="openid email"
@@ -49,5 +50,58 @@
             }
         }
     </script>
+
+    <!-- FaceBook Login -->
+    <script>
+        window.fbAsyncInit = function() {
+            FB.init({
+            appId            : '262265884484684',
+            autoLogAppEvents : true,
+            xfbml            : true,
+            version          : 'v3.2'
+            });
+        };
+
+        // Load the SDK asynchronously
+        (function(d, s, id) {
+            var js, fjs = d.getElementsByTagName(s)[0];
+            if(d.getElementById(id)) return;
+            js = d.createElement(s); js.id = id;
+            js.src = "https://connect.facebook.net/en_US/sdk.js";
+            fjs.parentNode.insertBefore(js, fjs);
+        }(document, 'script', 'facebook-jssdk'));
+
+        // Respond to the onlogin event from the fb:login-button
+        function sendTokenToServer() {
+            var response = FB.getAuthResponse();
+            console.log(response);
+            var access_token = response['accessToken']
+            console.log(access_token);
+
+            FB.api('/me', function(response) {
+                console.log('Successful login for: ' + response.name);
+            });
+
+            $.ajax({
+                type: 'POST',
+                url: '/fbconnect?state={{STATE}}',
+                processData: false,
+                data: access_token,
+                contentType: 'text/plain',
+                success: function(result) {
+                    if (result) {
+                        $('#result').html('Login Successful!</br>' + result + '</br>Redirecting');
+                        setTimeout(function(){
+                            window.location.href = '/restaurant';
+                        }, 4000);
+                    } else {
+                        $('#result').html('Failed to make server-side call. Check the console.');
+                    }
+                }
+            });
+        }
+    </script>
+    <fb:login-button scope="public_profile,email" onlogin="sendTokenToServer();">
+    </fb:login-button>
 </body>
 </html>

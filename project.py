@@ -101,7 +101,7 @@ def gconnect():
 
     # store the login information
     login_session['access_token'] = access_token
-    login_session['gplus_id'] = gplus_id
+    login_session['provider_id'] = gplus_id
 
     # get user info
     userinfo_url = 'https://www.googleapis.com/oauth2/v1/userinfo'
@@ -109,6 +109,7 @@ def gconnect():
     answer = requests.get(userinfo_url, params=params)
     data = json.loads(answer.text)
 
+    login_session['provider'] = 'google'
     login_session['username'] = data['email'] # name isn't part of the payload
     login_session['picture'] = data['picture']
     login_session['email'] = data['email']
@@ -121,39 +122,111 @@ def gconnect():
 
     # display user information response
     output = '<h1>Welcome, {}!</h1>'.format(login_session['username'])
-    output += '<img src="{}" style="width: 300px; height: 300px; border-radius: 150px"'.format(login_session['picture'])
+    output += '<img src="{}" style="width: 200px; height: 200px; border-radius: 150px"'.format(login_session['picture'])
     flash('You are now signed is as: {}'.format(login_session['username']))
     return output
 
 
-@app.route('/gdisconnect')
-def gdisconnect():
+@app.route('/disconnect')
+def disconnect():
+    # check if we have an active session
     access_token = login_session.get('access_token')
     if access_token is None:
-        response = make_response(json.dumps('Current user is not connected'), 401)
+        response = make_response(json.dumps('Current user is not logged in'), 401)
         response.headers['Content-Type'] = 'application/json'
         return response
-    result = requests.post(
-        'https://accounts.google.com/o/oauth2/revoke',
-        params={'token': access_token},
-        headers={'Content-Type': 'application/x-www-form-urlencoded'}
-    )
-    status_code = getattr(result, 'status_code')
-    if status_code == 200:
-        del login_session['access_token']
-        del login_session['gplus_id']
-        del login_session['username']
-        del login_session['picture']
-        del login_session['email']
-        del login_session['user_id']
-        response = make_response(json.dumps('User disconnected'), 200)
+
+    # disconnect based on the provider
+    if login_session['provider'] == 'google':
+        result = requests.post(
+            'https://accounts.google.com/o/oauth2/revoke',
+            params={'token': access_token},
+            headers={'Content-Type': 'application/x-www-form-urlencoded'}
+        )
+        status_code = getattr(result, 'status_code')
+        print('Disconnect returned: {}'.format(status_code))
+    elif login_session['provider'] == 'facebook':
+        facebook_id = login_session['provider_id']
+        url = 'https://graph.facebook.com/{}/permissions?access_toekn{}'.format(facebook_id, access_token)
+        h = httplib2.Http()
+        result = h.request(url, 'DELETE')[1]
+        print('Disconnect result: {}'.format(result))
+
+    # clear out the login_session no matter the response
+    del login_session['provider']
+    del login_session['access_token']
+    del login_session['provider_id']
+    del login_session['username']
+    del login_session['picture']
+    del login_session['email']
+    del login_session['user_id']
+
+    response = make_response(json.dumps('User disconnected'), 200)
+    response.headers['Content-Type'] = 'application/json'
+    return response
+
+
+@app.route('/fbconnect', methods=['POST'])
+def fbconnect():
+    # check client token
+    if request.args.get('state') != login_session['state']:
+        response = make_response(json.dumps('Invalid state parameter'), 401)
         response.headers['Content-Type'] = 'application/json'
         return response
-    else:
-        # seems like we should actually clear the cached data anyway
-        response = make_response(json.dumps('Failed to disconnect user'), 400)
-        response.headers['Content-Type'] = 'application/json'
-        return response
+
+    # BUGBUG - for some reason request.data would return b'xxx' formatted data
+    # this was corrupting the url used in token exchange
+    access_token = request.get_data(as_text=True)
+    print('Access token: {}'.format(access_token))
+
+    # exchange client token
+    client_secrets = json.loads(open('fb_client_secret.json', 'r').read())
+    app_id = client_secrets['web']['app_id']
+    app_secret = client_secrets['web']['app_secret']
+    url = 'https://graph.facebook.com/oauth/access_token?grant_type=fb_exchange_token&client_id=%s&client_secret=%s&fb_exchange_token=%s' % (app_id, app_secret, access_token)
+    h = httplib2.Http()
+    result = h.request(url, 'GET')[1]
+
+    print(url)
+    print('Token exchange result: {}'.format(result))
+    # BUGBUG - the sample code had this as doing some funked out string parsing
+    # token = result.split(',')[0].split(':')[1].replace('"', '')
+    token = json.loads(result)['access_token']
+    print('Token: {}'.format(token))
+
+    # get profile data
+    url = 'https://graph.facebook.com/v2.8/me?access_token={}&fields=name,id,email'.format(token)
+    h = httplib2.Http()
+    result = h.request(url, 'GET')[1]
+
+    print('me result: {}'.format(result))
+    data = json.loads(result)
+    login_session['provider'] = 'facebook'
+    login_session['username'] = data['name']
+    login_session['email'] = data['email']
+    login_session['provider_id'] = data['id']
+    login_session['access_token'] = token
+
+    # get user image
+    url = 'https://graph.facebook.com/v2.8/me/picture?access_token={}&redirect=0&height=200&width=200'.format(token)
+    h = httplib2.Http()
+    result = h.request(url, 'GET')[1]
+    data = json.loads(result)
+    print('me/picture result: {}'.format(result))
+
+    login_session['picture'] = data['data']['url']
+
+    # check if user exists
+    user_id = getUserId(login_session['email'])
+    if not user_id:
+        user_id = createUser(login_session)
+    login_session['user_id'] = user_id
+
+    # display user information response
+    output = '<h1>Welcome, {}!</h1>'.format(login_session['username'])
+    output += '<img src="{}" style="width: 200px; height: 200px; border-radius: 150px"'.format(login_session['picture'])
+    flash('You are now signed is as: {}'.format(login_session['username']))
+    return output
 
 
 @app.route('/login')
